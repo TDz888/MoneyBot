@@ -1,19 +1,16 @@
 """
-🤖 DENIA AI BOT - FINAL PRO v3
-Logic: Dpaste.com lam link dich. User vuot Yeumoney -> thay KEY tren trang paste -> /key ve bot.
+Denia AI Bot - Final Secure Version
+Logic: Chi gui link rut gon, KHONG hien thi key trong Telegram.
+User vuot Yeumoney -> thay key tren dpaste -> /key ve bot.
 """
-import os, sys, random, string, logging, asyncio, json, re, html
+import os, sys, random, string, logging, asyncio, html
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Tuple
 import httpx
 import aiosqlite
 from dotenv import load_dotenv
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand, BotCommandScopeDefault, BotCommandScopeChat
-from telegram.ext import (
-    Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, ContextTypes, filters
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from telegram.constants import ParseMode
 
 load_dotenv()
@@ -40,11 +37,7 @@ REFERRAL_BONUS_REQ = int(os.getenv("REFERRAL_BONUS_REQ", "50"))
 MAINTENANCE_MODE = int(os.getenv("MAINTENANCE_MODE", "0"))
 AUTO_CLEANUP_DAYS = int(os.getenv("AUTO_CLEANUP_DAYS", "7"))
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%H:%M:%S"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
 logger = logging.getLogger("DeniaBot")
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "denia_pro.db")
@@ -77,9 +70,7 @@ async def init_db():
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, role TEXT, content TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )""")
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS cooldowns (user_id INTEGER PRIMARY KEY, last_chat_at TIMESTAMP)
-        """)
+        await db.execute("CREATE TABLE IF NOT EXISTS cooldowns (user_id INTEGER PRIMARY KEY, last_chat_at TIMESTAMP)")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, action TEXT, detail TEXT,
@@ -89,9 +80,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS model_prices (
                 model_name TEXT PRIMARY KEY, req_price INTEGER DEFAULT 1, enabled INTEGER DEFAULT 1
             )""")
-        await db.execute("""
-            CREATE TABLE IF NOT EXISTS prompts (name TEXT PRIMARY KEY, content TEXT, enabled INTEGER DEFAULT 1)
-        """)
+        await db.execute("CREATE TABLE IF NOT EXISTS prompts (name TEXT PRIMARY KEY, content TEXT, enabled INTEGER DEFAULT 1)")
         await db.execute("""
             CREATE TABLE IF NOT EXISTS runtime_config (
                 key TEXT PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -146,9 +135,8 @@ async def get_or_create_user(user_id: int, username: str = None, first_name: str
         row = await cur.fetchone()
         if not row:
             ref_code = "REF" + str(user_id) + str(random.randint(1000,9999))
-            await db.execute("""
-                INSERT INTO users (user_id, username, first_name, selected_model, referral_code)
-                VALUES (?, ?, ?, ?, ?)""", (user_id, username, first_name, DEFAULT_MODEL, ref_code))
+            await db.execute("INSERT INTO users (user_id, username, first_name, selected_model, referral_code) VALUES (?, ?, ?, ?, ?)",
+                (user_id, username, first_name, DEFAULT_MODEL, ref_code))
             await db.commit()
             return {"user_id": user_id, "username": username, "first_name": first_name,
                     "req_balance": 0, "total_keys_used": 0, "total_messages": 0,
@@ -167,7 +155,7 @@ async def can_create_key(user_id: int) -> tuple:
         cur = await db.execute("SELECT last_key_at, keys_today, last_key_date, banned FROM users WHERE user_id = ?", (user_id,))
         row = await cur.fetchone()
         if not row: return (True, "")
-        if row[3]: return (False, "🚫 Tai khoan cua ban da bi khoa. Lien he admin.")
+        if row[3]: return (False, "Tai khoan cua ban da bi khoa. Lien he admin.")
         last_key_at, keys_today, last_key_date = row[0], row[1] or 0, row[2]
         today_str = datetime.now().strftime("%Y-%m-%d")
         if last_key_date != today_str:
@@ -190,9 +178,8 @@ async def create_key(user_id: int, key_code: str) -> bool:
         try:
             await db.execute("INSERT INTO keys (key_code, user_id, expires_at) VALUES (?, ?, ?)", (key_code, user_id, expires.isoformat()))
             today_str = datetime.now().strftime("%Y-%m-%d")
-            await db.execute("""
-                UPDATE users SET last_key_at = ?, keys_today = keys_today + 1, last_key_date = ?
-                WHERE user_id = ?""", (datetime.now().isoformat(), today_str, user_id))
+            await db.execute("UPDATE users SET last_key_at = ?, keys_today = keys_today + 1, last_key_date = ? WHERE user_id = ?",
+                (datetime.now().isoformat(), today_str, user_id))
             await db.commit(); return True
         except Exception as e:
             logger.error("create_key error: " + str(e)); return False
@@ -204,21 +191,21 @@ async def use_key(key_code: str, user_id: int) -> dict:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT user_id, used, expires_at FROM keys WHERE key_code = ?", (key_code,))
         row = await cur.fetchone()
-        if not row: return {"ok": False, "msg": "❌ Key khong ton tai."}
+        if not row: return {"ok": False, "msg": "Key khong ton tai."}
         key_owner, used, expires_at = row[0], row[1], row[2]
-        if used: return {"ok": False, "msg": "❌ Key da duoc su dung."}
-        if key_owner != user_id: return {"ok": False, "msg": "❌ Key nay khong thuoc ve ban."}
+        if used: return {"ok": False, "msg": "Key da duoc su dung."}
+        if key_owner != user_id: return {"ok": False, "msg": "Key nay khong thuoc ve ban."}
         if expires_at and datetime.fromisoformat(expires_at) < datetime.now():
             await db.execute("UPDATE keys SET used = 1 WHERE key_code = ?", (key_code,))
-            await db.commit(); return {"ok": False, "msg": "⏳ Key da het han."}
+            await db.commit(); return {"ok": False, "msg": "Key da het han."}
         cur2 = await db.execute("SELECT req_balance FROM users WHERE user_id = ?", (user_id,))
         bal = (await cur2.fetchone())[0] or 0
-        if bal + req_per > max_bal: return {"ok": False, "msg": "💎 Ban da dat gioi han " + str(max_bal) + " req."}
+        if bal + req_per > max_bal: return {"ok": False, "msg": "Ban da dat gioi han " + str(max_bal) + " req."}
         await db.execute("UPDATE keys SET used = 1 WHERE key_code = ?", (key_code,))
         await db.execute("UPDATE users SET req_balance = req_balance + ?, total_keys_used = total_keys_used + 1 WHERE user_id = ?", (req_per, user_id))
         await db.execute("INSERT INTO logs (user_id, action, detail) VALUES (?, ?, ?)", (user_id, "USE_KEY", key_code + " +" + str(req_per) + "req"))
         await db.commit()
-        return {"ok": True, "msg": "✅ Key hop le! +" + str(req_per) + " req."}
+        return {"ok": True, "msg": "Key hop le! +" + str(req_per) + " req."}
 
 async def deduct_req(user_id: int, amount: int) -> bool:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -380,9 +367,6 @@ async def auto_cleanup():
         await db.execute("DELETE FROM conversations WHERE created_at < ?", (cutoff,)); await db.commit()
         logger.info("Auto cleanup completed (older than " + str(days) + " days)")
 
-# ========================
-# Key Generator & Paste Service
-# ========================
 def generate_key() -> str:
     p1 = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
     p2 = "".join(random.choices(string.ascii_uppercase + string.digits, k=2))
@@ -391,10 +375,9 @@ def generate_key() -> str:
     return "denia-" + p1 + "-" + p2 + "-" + p3 + "-" + p4
 
 async def create_paste_dpaste(key: str) -> str | None:
-    """Tao paste chua key tren dpaste.com - khong can API key, free"""
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            content_text = "🔑 Ma kich hoat Denia AI\n\n" + key + "\n\nCopy ma tren va gui lai bot: /key " + key
+            content_text = "Ma kich hoat Denia AI\n\n" + key + "\n\nCopy ma tren va gui lai bot: /key " + key
             r = await client.post(
                 "https://dpaste.com/api/",
                 data={"content": content_text, "syntax": "text", "expiry_days": "1"},
@@ -407,9 +390,6 @@ async def create_paste_dpaste(key: str) -> str | None:
         logger.warning("dpaste error: " + str(e))
     return None
 
-# ========================
-# Yeumoney API (QL_api.php)
-# ========================
 async def shorten_yeumoney(long_url: str) -> str | None:
     if not YEUMONEY_API_KEY or not YEUMONEY_API_URL: return None
     try:
@@ -426,9 +406,6 @@ async def shorten_yeumoney(long_url: str) -> str | None:
         logger.warning("Yeumoney API error: " + str(e))
     return None
 
-# ========================
-# AI Chat with Memory
-# ========================
 async def chat_ai(user_id: int, user_message: str) -> tuple[str, int]:
     model = await get_user_model(user_id)
     prices = await get_model_prices(); req_cost = 1
@@ -450,9 +427,9 @@ async def chat_ai(user_id: int, user_message: str) -> tuple[str, int]:
             if "choices" in data and len(data["choices"]) > 0:
                 reply = data["choices"][0]["message"]["content"]
                 await add_conversation(user_id, "user", user_message); await add_conversation(user_id, "assistant", reply); return (reply, req_cost)
-            return ("❌ AI khong tra loi. Thu lai sau.", 0)
+            return ("AI khong tra loi. Thu lai sau.", 0)
     except Exception as e:
-        logger.error("AI error: " + str(e)); return ("❌ AI dang ban. Vui long thu lai sau.", 0)
+        logger.error("AI error: " + str(e)); return ("AI dang ban. Vui long thu lai sau.", 0)
 
 def get_model_price(model: str) -> int:
     model_key = model.replace("/", "-").lower()
@@ -460,9 +437,6 @@ def get_model_price(model: str) -> int:
         if k.lower() in model_key or model_key in k.lower(): return v
     return 1
 
-# ========================
-# Admin Check & Maintenance
-# ========================
 ADMIN_ID = ADMIN_TELEGRAM_ID
 def is_admin(user_id: int) -> bool:
     global ADMIN_ID
@@ -474,33 +448,28 @@ async def auto_set_admin(user_id: int):
 async def is_maintenance() -> bool:
     cfg = await get_all_runtime_config(); return cfg.get("MAINTENANCE_MODE", str(MAINTENANCE_MODE)) == "1"
 
-# ========================
-# User Handlers
-# ========================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args
 
-    # Xu ly Deep Link auto verify key (sau khi vuot Yeumoney qua Telegram)
     if args and len(args) > 0:
         key_input = args[0].strip().upper()
         if key_input.startswith("DENIA-"):
             u = await get_or_create_user(user.id, user.username, user.first_name)
             if u["banned"]:
-                await update.message.reply_text("🚫 Tai khoan cua ban da bi khoa. Lien he admin.")
+                await update.message.reply_text("Tai khoan cua ban da bi khoa. Lien he admin.")
                 return
             result = await use_key(key_input, user.id)
             if result["ok"]:
                 await update.message.reply_text(
-                    "🎉 <b>Chao mung tro lai!</b>\n\n" + result["msg"] + "\n\n"
-                    "✨ Ban co the bat dau chat AI ngay bay gio!\n"
-                    "💡 Go /help de xem huong dan chi tiet.",
+                    "Chao mung tro lai!\n\n" + result["msg"] + "\n\n"
+                    "Ban co the bat dau chat AI ngay bay gio!\n"
+                    "Go /help de xem huong dan chi tiet.",
                     parse_mode=ParseMode.HTML
                 )
             else:
-                await update.message.reply_text("⚠️ " + result["msg"], parse_mode=ParseMode.HTML)
+                await update.message.reply_text(result["msg"], parse_mode=ParseMode.HTML)
             return
-        # Xu ly referral code
         elif args[0].startswith("REF"):
             referrer_code = args[0].strip()
             u = await get_or_create_user(user.id, user.username, user.first_name)
@@ -512,71 +481,71 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     if success:
                         bonus = int(await get_runtime_config("REFERRAL_BONUS_REQ", str(REFERRAL_BONUS_REQ)))
                         await update.message.reply_text(
-                            "🎉 <b>Chao mung!</b> Ban duoc moi boi user <code>" + str(row[0]) + "</code>.\n"
-                            "💎 Ca 2 ban deu nhan +" + str(bonus) + " req!",
+                            "Chao mung! Ban duoc moi boi user.\n"
+                            "Ca 2 ban deu nhan +" + str(bonus) + " req!",
                             parse_mode=ParseMode.HTML
                         )
                         try:
                             await context.bot.send_message(row[0],
-                                "🎉 <b>Chuc mung!</b> User <code>" + str(user.id) + "</code> da dung ma gioi thieu cua ban.\n"
-                                "💎 Ban nhan +" + str(bonus) + " req!", parse_mode=ParseMode.HTML)
+                                "Chuc mung! User da dung ma gioi thieu cua ban.\n"
+                                "Ban nhan +" + str(bonus) + " req!", parse_mode=ParseMode.HTML)
                         except Exception: pass
                         return
 
     u = await get_or_create_user(user.id, user.username, user.first_name)
     if u["banned"]:
-        await update.message.reply_text("🚫 Tai khoan cua ban da bi khoa. Lien he admin.")
+        await update.message.reply_text("Tai khoan cua ban da bi khoa. Lien he admin.")
         return
 
     prices = await get_model_prices()
-    price_list = "\n".join(["• <code>" + html.escape(k) + "</code>: " + str(v['price']) + " req" for k, v in prices.items() if v['enabled']])
+    price_list = "\n".join(["- " + html.escape(k) + ": " + str(v['price']) + " req" for k, v in prices.items() if v['enabled']])
 
     keyboard = [
-        [InlineKeyboardButton("🔑 Nhan Key Moi", callback_data="getkey")],
-        [InlineKeyboardButton("📅 Diem Danh", callback_data="checkin"), InlineKeyboardButton("💎 So Du", callback_data="balance")],
-        [InlineKeyboardButton("🤖 Chon Model", callback_data="models"), InlineKeyboardButton("🎭 Tinh Cach", callback_data="prompts")],
-        [InlineKeyboardButton("🏆 Bang Xep Hang", callback_data="top"), InlineKeyboardButton("📞 Ho Tro", callback_data="support")]
+        [InlineKeyboardButton("Nhan Key Moi", callback_data="getkey")],
+        [InlineKeyboardButton("Diem Danh", callback_data="checkin"), InlineKeyboardButton("So Du", callback_data="balance")],
+        [InlineKeyboardButton("Chon Model", callback_data="models"), InlineKeyboardButton("Tinh Cach", callback_data="prompts")],
+        [InlineKeyboardButton("Bang Xep Hang", callback_data="top"), InlineKeyboardButton("Ho Tro", callback_data="support")]
     ]
 
     await update.message.reply_text(
-        "👋 <b>Xin chao " + html.escape(user.first_name or "ban") + "!</b>\n\n"
-        "🤖 <b>Denia AI Bot</b> — Tro ly AI thong minh, co tri nho!\n\n"
-        "💎 <b>So du:</b> <code>" + str(u['req_balance']) + " req</code>\n"
-        "⚙️ <b>Model:</b> <code>" + html.escape(u['selected_model'] or DEFAULT_MODEL) + "</code>\n"
-        "🎭 <b>Tinh cach:</b> <code>" + str(u['selected_prompt']) + "</code>\n"
-        "💰 <b>Gia chat:</b> <code>" + str(get_model_price(u['selected_model'] or DEFAULT_MODEL)) + " req</code>/tin nhan\n\n"
-        "<b>📋 Bang gia model:</b>\n" + price_list + "\n\n"
-        "🎁 <b>Ma gioi thieu:</b> <code>" + str(u['referral_code']) + "</code>\n"
-        "💡 Go <code>/help</code> de xem huong dan chi tiet.",
+        "Xin chao " + html.escape(user.first_name or "ban") + "!\n\n"
+        "Denia AI Bot - Tro ly AI thong minh, co tri nho!\n\n"
+        "So du: " + str(u['req_balance']) + " req\n"
+        "Model: " + html.escape(u['selected_model'] or DEFAULT_MODEL) + "\n"
+        "Tinh cach: " + str(u['selected_prompt']) + "\n"
+        "Gia chat: " + str(get_model_price(u['selected_model'] or DEFAULT_MODEL)) + " req/tin nhan\n\n"
+        "Bang gia model:\n" + price_list + "\n\n"
+        "Ma gioi thieu: " + str(u['referral_code']) + "\n"
+        "Go /help de xem huong dan chi tiet.",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode=ParseMode.HTML
     )
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "📖 <b>Huong Dan Su Dung — Denia AI</b>\n\n"
-        "<b>🎯 Cach nhan req (3 buoc don gian):</b>\n"
-        "1️⃣ Nhan <b>🔑 Nhan Key Moi</b> tren menu\n"
-        "2️⃣ Bot tao link rut gon qua Yeumoney\n"
-        "3️⃣ <b>Copy link</b> → mo trinh duyet → vuot → thay <b>KEY</b> hien ra\n"
-        "4️⃣ Copy KEY → gui bot: <code>/key denia-XXXXXX-XX-XXXXXXXXXXXXX-XXX</code>\n"
-        "5️⃣ Bot cong req ngay lap tuc!\n\n"
-        "<b>🎭 Lenh nang cao:</b>\n"
-        "• <code>/model</code> — Chon model AI\n"
-        "• <code>/prompt</code> — Chon tinh cach AI\n"
-        "• <code>/new</code> — Xoa lich su chat\n"
-        "• <code>/history</code> — Xem lich su\n"
-        "• <code>/profile</code> — Ho so ca nhan\n"
-        "• <code>/top</code> — Bang xep hang\n"
-        "• <code>/checkin</code> — Diem danh nhan req\n"
-        "• <code>/ref</code> — Ma gioi thieu\n"
-        "• <code>/feedback</code> — Gop y cho admin\n\n"
-        "<b>⚠️ Luu y:</b>\n"
-        "• Moi tin nhan AI ton req tuy model (1-5 req)\n"
-        "• Nhan key cach nhau 15 phut, toi da 10 key/ngay\n"
-        "• Gioi han tich luy: 5000 req\n"
-        "• Key het han sau 120 phut neu khong dung\n\n"
-        "📞 <b>Ho tro:</b> " + ADMIN_PHONE,
+        "Huong Dan Su Dung - Denia AI\n\n"
+        "Cach nhan req (3 buoc don gian):\n"
+        "1. Nhan 'Nhan Key Moi' tren menu\n"
+        "2. Bot tao link rut gon qua Yeumoney\n"
+        "3. Copy link -> mo trinh duyet -> vuot -> thay KEY hien ra\n"
+        "4. Copy KEY -> gui bot: /key denia-XXXXXX-XX-XXXXXXXXXXXXX-XXX\n"
+        "5. Bot cong req ngay lap tuc!\n\n"
+        "Lenh nang cao:\n"
+        "/model - Chon model AI\n"
+        "/prompt - Chon tinh cach AI\n"
+        "/new - Xoa lich su chat\n"
+        "/history - Xem lich su\n"
+        "/profile - Ho so ca nhan\n"
+        "/top - Bang xep hang\n"
+        "/checkin - Diem danh nhan req\n"
+        "/ref - Ma gioi thieu\n"
+        "/feedback - Gop y cho admin\n\n"
+        "Luu y:\n"
+        "- Moi tin nhan AI ton req tuy model (1-5 req)\n"
+        "- Nhan key cach nhau 15 phut, toi da 10 key/ngay\n"
+        "- Gioi han tich luy: 5000 req\n"
+        "- Key het han sau 120 phut neu khong dung\n\n"
+        "Ho tro: " + ADMIN_PHONE,
         parse_mode=ParseMode.HTML
     )
 
@@ -584,13 +553,13 @@ async def key_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args:
         await update.message.reply_text(
-            "⚠️ Vui long gui kem ma key.\n"
-            "Vi du: <code>/key denia-A1B2C3-D4-E5F6G7H8I9J10-K11</code>",
+            "Vui long gui kem ma key.\n"
+            "Vi du: /key denia-A1B2C3-D4-E5F6G7H8I9J10-K11",
             parse_mode=ParseMode.HTML
         ); return
     key_input = context.args[0].strip().upper()
     if not key_input.startswith("DENIA-"):
-        await update.message.reply_text("❌ Key phai bat dau bang <code>denia-</code>", parse_mode=ParseMode.HTML); return
+        await update.message.reply_text("Key phai bat dau bang denia-", parse_mode=ParseMode.HTML); return
     result = await use_key(key_input, user_id)
     await update.message.reply_text(result["msg"], parse_mode=ParseMode.HTML)
 
@@ -606,18 +575,18 @@ async def model_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if len(row) == 2: buttons.append(row); row = []
         if row: buttons.append(row)
         await update.message.reply_text(
-            "⚙️ <b>Model hien tai:</b> <code>" + html.escape(current) + "</code>\n\n"
+            "Model hien tai: " + html.escape(current) + "\n\n"
             "Chon model ben duoi:", reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML
         ); return
     model_name = " ".join(context.args).strip(); found = False
     for k in prices.keys():
         if model_name.lower() in k.lower() or k.lower() in model_name.lower():
             if prices[k]["enabled"]: model_name = k; found = True; break
-    if not found: await update.message.reply_text("❌ Model khong hop le hoac da bi tat."); return
+    if not found: await update.message.reply_text("Model khong hop le hoac da bi tat."); return
     await set_user_model(user_id, model_name)
     await update.message.reply_text(
-        "✅ Da chuyen sang model: <code>" + html.escape(model_name) + "</code>\n"
-        "💰 Gia: " + str(prices[model_name]['price']) + " req/tin nhan", parse_mode=ParseMode.HTML
+        "Da chuyen sang model: " + html.escape(model_name) + "\n"
+        "Gia: " + str(prices[model_name]['price']) + " req/tin nhan", parse_mode=ParseMode.HTML
     )
 
 async def prompt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -629,14 +598,14 @@ async def prompt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for name, content, enabled in prompts:
             if enabled: buttons.append([InlineKeyboardButton(name.upper(), callback_data="setprompt|" + name)])
         await update.message.reply_text(
-            "🎭 <b>Tinh cach hien tai:</b> <code>" + current + "</code>\n\n"
+            "Tinh cach hien tai: " + current + "\n\n"
             "Chon tinh cach ben duoi:", reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML
         ); return
     name = context.args[0].strip().lower(); valid = [p[0] for p in prompts if p[2]]
-    if name not in valid: await update.message.reply_text("❌ Tinh cach khong hop le. Cac lua chon: " + ", ".join(valid)); return
+    if name not in valid: await update.message.reply_text("Tinh cach khong hop le. Cac lua chon: " + ", ".join(valid)); return
     await set_user_prompt(user_id, name)
     await update.message.reply_text(
-        "🎭 Da chuyen sang tinh cach: <b>" + name.upper() + "</b>\n"
+        "Da chuyen sang tinh cach: " + name.upper() + "\n"
         "AI se tra loi theo phong cach moi tu tin nhan tiep theo.", parse_mode=ParseMode.HTML
     )
 
@@ -644,7 +613,7 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await clear_conversation(user_id)
     await update.message.reply_text(
-        "🧠 <b>Da xoa lich su chat!</b>\n\n"
+        "Da xoa lich su chat!\n\n"
         "AI khong con nho gi ve cuoc tro chuyen truoc.\n"
         "Ban co the bat dau chu de moi ngay bay gio.", parse_mode=ParseMode.HTML
     )
@@ -652,10 +621,10 @@ async def new_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     hist = await get_conversation_history(user_id, limit=10)
-    if not hist: await update.message.reply_text("📝 Chua co lich su chat nao."); return
-    text = "📝 <b>Lich su chat gan day:</b>\n\n"
+    if not hist: await update.message.reply_text("Chua co lich su chat nao."); return
+    text = "Lich su chat gan day:\n\n"
     for msg in hist:
-        role = "👤 Ban" if msg["role"] == "user" else "🤖 AI"
+        role = "Ban" if msg["role"] == "user" else "AI"
         content = msg["content"][:100] + "..." if len(msg["content"]) > 100 else msg["content"]
         text += role + ": " + html.escape(content) + "\n\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
@@ -668,28 +637,28 @@ async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     for k,v in prices.items():
         if k.lower() in model.lower() or model.lower() in k.lower(): price = v["price"]; break
     text = (
-        "👤 <b>Ho so cua ban</b>\n\n"
-        "🆔 <b>ID:</b> <code>" + str(u['user_id']) + "</code>\n"
-        "👤 <b>Ten:</b> " + html.escape(u['first_name'] or 'N/A') + "\n"
-        "💎 <b>So du:</b> <code>" + str(u['req_balance']) + " req</code>\n"
-        "🔑 <b>Da dung:</b> " + str(u['total_keys_used']) + " key\n"
-        "💬 <b>Tin nhan:</b> " + str(u['total_messages']) + "\n"
-        "📅 <b>Tham gia:</b> " + (u['created_at'][:10] if u['created_at'] else 'N/A') + "\n"
-        "⚙️ <b>Model:</b> <code>" + html.escape(model) + "</code>\n"
-        "🎭 <b>Tinh cach:</b> <code>" + str(u['selected_prompt']) + "</code>\n"
-        "💰 <b>Gia chat:</b> " + str(price) + " req/tin nhan\n"
-        "🎁 <b>Ma gioi thieu:</b> <code>" + str(u['referral_code']) + "</code>\n"
+        "Ho so cua ban\n\n"
+        "ID: " + str(u['user_id']) + "\n"
+        "Ten: " + html.escape(u['first_name'] or 'N/A') + "\n"
+        "So du: " + str(u['req_balance']) + " req\n"
+        "Da dung: " + str(u['total_keys_used']) + " key\n"
+        "Tin nhan: " + str(u['total_messages']) + "\n"
+        "Tham gia: " + (u['created_at'][:10] if u['created_at'] else 'N/A') + "\n"
+        "Model: " + html.escape(model) + "\n"
+        "Tinh cach: " + str(u['selected_prompt']) + "\n"
+        "Gia chat: " + str(price) + " req/tin nhan\n"
+        "Ma gioi thieu: " + str(u['referral_code']) + "\n"
     )
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def top_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     top = await get_top_users()
-    if not top: await update.message.reply_text("🏆 Chua co du lieu xep hang."); return
-    text = "🏆 <b>Bang xep hang — Top 10</b>\n\n"
-    medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    if not top: await update.message.reply_text("Chua co du lieu xep hang."); return
+    text = "Bang Xep Hang - Top 10\n\n"
+    medals = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]
     for i, u in enumerate(top):
         name = html.escape(u[1] or u[2] or "User " + str(u[0]))
-        text += medals[i] + " <b>" + name + "</b> — " + str(u[3]) + " tin nhan | " + str(u[4]) + " req\n"
+        text += medals[i] + ". " + name + " - " + str(u[3]) + " tin nhan | " + str(u[4]) + " req\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -697,14 +666,14 @@ async def checkin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ok, bonus = await daily_checkin(user_id)
     if ok:
         await update.message.reply_text(
-            "📅 <b>Diem danh thanh cong!</b>\n\n"
-            "🎉 Ban nhan +" + str(bonus) + " req mien phi!\n"
-            "🌟 Hen gap lai ban vao ngay mai!", parse_mode=ParseMode.HTML
+            "Diem danh thanh cong!\n\n"
+            "Ban nhan +" + str(bonus) + " req mien phi!\n"
+            "Hen gap lai ban vao ngay mai!", parse_mode=ParseMode.HTML
         )
     else:
         await update.message.reply_text(
-            "⚠️ <b>Ban da diem danh hom nay roi!</b>\n\n"
-            "🌅 Hay quay lai vao ngay mai de nhan them req nhe.", parse_mode=ParseMode.HTML
+            "Ban da diem danh hom nay roi!\n\n"
+            "Hay quay lai vao ngay mai de nhan them req nhe.", parse_mode=ParseMode.HTML
         )
 
 async def ref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -713,10 +682,10 @@ async def ref_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bonus = int(await get_runtime_config("REFERRAL_BONUS_REQ", str(REFERRAL_BONUS_REQ)))
     link = "https://t.me/" + context.bot.username + "?start=" + u['referral_code']
     await update.message.reply_text(
-        "🎁 <b>Ma gioi thieu cua ban</b>\n\n"
-        "🔗 <b>Link moi:</b> <code>" + link + "</code>\n\n"
-        "💎 <b>Phan thuong:</b> Moi luot moi thanh cong, ca 2 deu nhan +" + str(bonus) + " req!\n"
-        "📤 <b>Huong dan:</b> Chia se link ben tren cho ban be. Khi ho nhan Start, ca 2 deu duoc thuong.",
+        "Ma gioi thieu cua ban\n\n"
+        "Link moi: " + link + "\n\n"
+        "Phan thuong: Moi luot moi thanh cong, ca 2 deu nhan +" + str(bonus) + " req!\n"
+        "Huong dan: Chia se link ben tren cho ban be. Khi ho nhan Start, ca 2 deu duoc thuong.",
         parse_mode=ParseMode.HTML
     )
 
@@ -724,25 +693,22 @@ async def feedback_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not context.args:
         await update.message.reply_text(
-            "📣 Vui long gui kem noi dung gop y.\n"
-            "Vi du: <code>/feedback Bot rat hay, cam on admin!</code>", parse_mode=ParseMode.HTML
+            "Vui long gui kem noi dung gop y.\n"
+            "Vi du: /feedback Bot rat hay, cam on admin!", parse_mode=ParseMode.HTML
         ); return
     content = " ".join(context.args).strip()
     await add_feedback(user_id, content)
     await update.message.reply_text(
-        "✅ <b>Cam on ban da gop y!</b>\n\n"
+        "Cam on ban da gop y!\n\n"
         "Admin se xem xet va phan hoi som nhat.", parse_mode=ParseMode.HTML
     )
     try:
         if ADMIN_ID and ADMIN_ID != 0:
             await context.bot.send_message(ADMIN_ID,
-                "📣 <b>Feedback moi tu</b> <code>" + str(user_id) + "</code>:\n" + html.escape(content[:500]),
+                "Feedback moi tu " + str(user_id) + ":\n" + html.escape(content[:500]),
                 parse_mode=ParseMode.HTML)
     except Exception: pass
 
-# ========================
-# Callback Handler
-# ========================
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -752,57 +718,52 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "getkey":
         ok, msg = await can_create_key(user_id)
         if not ok:
-            await query.edit_message_text("⚠️ " + msg, parse_mode=ParseMode.HTML); return
+            await query.edit_message_text(msg, parse_mode=ParseMode.HTML); return
 
         key = generate_key()
-        await create_key(user_id, key)
+        success = await create_key(user_id, key)
+        if not success:
+            await query.edit_message_text("Loi he thong khi tao key. Vui long thu lai sau.", parse_mode=ParseMode.HTML); return
 
-        # Tao paste tren dpaste.com chua key (link dich)
         paste_url = await create_paste_dpaste(key)
-
         cfg = await get_all_runtime_config()
         expire = int(cfg.get("KEY_EXPIRE_MINUTES", KEY_EXPIRE_MINUTES))
 
         if paste_url:
-            # Rut gon link paste qua Yeumoney
             short_link = await shorten_yeumoney(paste_url)
-
             if short_link:
                 text = (
-                    "🔐 <b>Link vuot cua ban da san sang!</b>\n\n"
-                    "🔗 <b>Link rut gon Yeumoney:</b>\n"
-                    "<code>" + html.escape(short_link) + "</code>\n\n"
-                    "━━━━━━━━━━━━━━━━━━━━\n"
-                    "📋 <b>Huong dan vuot link (3 buoc):</b>\n\n"
-                    "1️⃣ <b>Copy link</b> ben tren -> mo <b>trinh duyet</b> (Chrome/Safari)\n"
-                    "2️⃣ Vuot Yeumoney (cho 15-30 giay) -> Click <b>Tiep tuc</b>\n"
-                    "3️⃣ Ban se thay <b>KEY</b> hien thi tren trang -> <b>Copy key</b>\n\n"
-                    "✏️ <b>Sau khi co key, gui lai bot:</b>\n"
-                    "<code>/key " + key + "</code>\n\n"
-                    "💎 Bot se cong <b>" + str(REQ_PER_LINK) + " req</b> ngay lap tuc!\n\n"
-                    "⏳ <b>Key het han sau:</b> " + str(expire) + " phut\n"
-                    "💡 <b>Luu y:</b> Khong thoat khoi trang Yeumoney truoc khi click Tiep tuc"
+                    "Link vuot cua ban da san sang!\n\n"
+                    "Link rut gon Yeumoney:\n"
+                    + html.escape(short_link) + "\n\n"
+                    "Huong dan vuot link (3 buoc):\n\n"
+                    "1. Copy link ben tren -> mo trinh duyet (Chrome/Safari)\n"
+                    "2. Vuot Yeumoney (cho 15-30 giay) -> click Tiep tuc\n"
+                    "3. Ban se thay KEY hien thi tren trang -> Copy key\n\n"
+                    "Sau khi co key, gui lai bot:\n"
+                    "/key [dan-key-vua-copy]\n\n"
+                    "Bot se cong " + str(REQ_PER_LINK) + " req ngay lap tuc!\n\n"
+                    "Key het han sau: " + str(expire) + " phut\n"
+                    "Luu y: Khong thoat khoi trang Yeumoney truoc khi click Tiep tuc"
                 )
             else:
-                # Khong rut gon duoc -> gui link paste goc
                 text = (
-                    "⚠️ <b>Bot chua rut gon duoc link.</b>\n\n"
-                    "🔗 <b>Link goc (ban tu rut gon qua Yeumoney):</b>\n"
-                    "<code>" + html.escape(paste_url) + "</code>\n\n"
-                    "📋 <b>Cach lam:</b>\n"
+                    "Bot chua rut gon duoc link.\n\n"
+                    "Link goc (ban tu rut gon qua Yeumoney):\n"
+                    + html.escape(paste_url) + "\n\n"
+                    "Cach lam:\n"
                     "1. Vao yeumoney.com -> rut gon link ben tren\n"
                     "2. Vuot link rut gon -> thay KEY hien thi\n"
-                    "3. Copy key -> gui bot: <code>/key " + key + "</code>\n\n"
-                    "⏳ <b>Key het han sau:</b> " + str(expire) + " phut"
+                    "3. Copy key -> gui bot: /key [dan-key]\n\n"
+                    "Key het han sau: " + str(expire) + " phut"
                 )
         else:
-            # Loi tao paste -> fallback gui key truc tiep (kem Deep Link)
             bot_username = context.bot.username or "bot"
             text = (
-                "❌ <b>Loi tao link dich.</b>\n\n"
-                "🔑 <b>Key cua ban:</b> <code>" + key + "</code>\n\n"
-                "⚠️ Vui long tu rut gon link nay qua Yeumoney:\n"
-                "<code>https://t.me/" + bot_username + "?start=" + key + "</code>\n\n"
+                "Loi tao link dich.\n\n"
+                "Key cua ban: " + key + "\n\n"
+                "Vui long tu rut gon link nay qua Yeumoney:\n"
+                "https://t.me/" + bot_username + "?start=" + key + "\n\n"
                 "Sau khi vuot, nhan Start de bot tu dong nhan key."
             )
 
@@ -815,15 +776,15 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for k,v in prices.items():
             if k.lower() in model.lower() or model.lower() in k.lower(): price = v["price"]; break
         await query.edit_message_text(
-            "💎 <b>So du tai khoan</b>\n\n"
-            "💰 <b>Req hien co:</b> <code>" + str(u['req_balance']) + " req</code>\n"
-            "🔑 <b>Da dung:</b> " + str(u['total_keys_used']) + " key\n"
-            "📅 <b>Hom nay:</b> " + str(u['keys_today']) + "/10 key\n"
-            "💬 <b>Tin nhan:</b> " + str(u['total_messages']) + "\n"
-            "⚙️ <b>Model:</b> <code>" + html.escape(model) + "</code>\n"
-            "🎭 <b>Tinh cach:</b> <code>" + str(u['selected_prompt']) + "</code>\n"
-            "💰 <b>Gia chat:</b> " + str(price) + " req/tin nhan\n\n"
-            "🎁 <b>Ma gioi thieu:</b> <code>" + str(u['referral_code']) + "</code>",
+            "So du tai khoan\n\n"
+            "Req hien co: " + str(u['req_balance']) + " req\n"
+            "Da dung: " + str(u['total_keys_used']) + " key\n"
+            "Hom nay: " + str(u['keys_today']) + "/10 key\n"
+            "Tin nhan: " + str(u['total_messages']) + "\n"
+            "Model: " + html.escape(model) + "\n"
+            "Tinh cach: " + str(u['selected_prompt']) + "\n"
+            "Gia chat: " + str(price) + " req/tin nhan\n\n"
+            "Ma gioi thieu: " + str(u['referral_code']),
             parse_mode=ParseMode.HTML
         )
 
@@ -836,10 +797,10 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if len(row) == 2: buttons.append(row); row = []
         if row: buttons.append(row)
         await query.edit_message_text(
-            "🤖 <b>Chon Model AI</b>\n\n"
-            "💡 <b>Goi y:</b>\n"
-            "• Model <b>1 req</b> = Nhanh, phu hop chat thuong\n"
-            "• Model <b>3-5 req</b> = Thong minh hon, chuyen sau\n\n"
+            "Chon Model AI\n\n"
+            "Goi y:\n"
+            "- Model 1 req = Nhanh, phu hop chat thuong\n"
+            "- Model 3-5 req = Thong minh hon, chuyen sau\n\n"
             "Chon model ben duoi:",
             reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML
         )
@@ -850,47 +811,46 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         for name, content, enabled in prompts:
             if enabled: buttons.append([InlineKeyboardButton(name.upper(), callback_data="setprompt|" + name)])
         await query.edit_message_text(
-            "🎭 <b>Chon Tinh Cach AI</b>\n\n"
-            "• <b>DEFAULT</b> — Tro ly can bang, da nang\n"
-            "• <b>CREATIVE</b> — Bay bong, giau cam xuc\n"
-            "• <b>CODER</b> — Lap trinh vien chuyen nghiep\n"
-            "• <b>TEACHER</b> — Giao vien kien nhan\n\n"
+            "Chon Tinh Cach AI\n\n"
+            "- DEFAULT: Tro ly can bang, da nang\n"
+            "- CREATIVE: Bay bong, giau cam xuc\n"
+            "- CODER: Lap trinh vien chuyen nghiep\n"
+            "- TEACHER: Giao vien kien nhan\n\n"
             "Chon tinh cach ben duoi:",
             reply_markup=InlineKeyboardMarkup(buttons), parse_mode=ParseMode.HTML
         )
 
     elif data == "support":
         await query.edit_message_text(
-            "📞 <b>Ho Tro Denia AI</b>\n\n"
-            "📱 <b>Zalo / Telegram:</b> <code>" + ADMIN_PHONE + "</code>\n"
-            "⏰ <b>Gio ho tro:</b> 08:00 — 22:00 (GMT+7)\n\n"
-            "⚠️ Vui long khong spam tin nhan.\n"
-            "💬 Mo ta ro van de de duoc ho tro nhanh nhat.",
+            "Ho Tro Denia AI\n\n"
+            "Zalo / Telegram: " + ADMIN_PHONE + "\n"
+            "Gio ho tro: 08:00 - 22:00 (GMT+7)\n\n"
+            "Vui long khong spam tin nhan.\n"
+            "Mo ta ro van de de duoc ho tro nhanh nhat.",
             parse_mode=ParseMode.HTML
         )
 
     elif data == "top":
         top = await get_top_users()
-        if not top: await query.edit_message_text("🏆 Chua co du lieu xep hang."); return
-        text = "🏆 <b>Bang Xep Hang — Top 10</b>\n\n"
-        medals = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        if not top: await query.edit_message_text("Chua co du lieu xep hang."); return
+        text = "Bang Xep Hang - Top 10\n\n"
         for i, u in enumerate(top):
             name = html.escape(u[1] or u[2] or "User " + str(u[0]))
-            text += medals[i] + " <b>" + name + "</b> — " + str(u[3]) + " tin nhan | " + str(u[4]) + " req\n"
+            text += str(i+1) + ". " + name + " - " + str(u[3]) + " tin nhan | " + str(u[4]) + " req\n"
         await query.edit_message_text(text, parse_mode=ParseMode.HTML)
 
     elif data == "checkin":
         ok, bonus = await daily_checkin(user_id)
         if ok:
             await query.edit_message_text(
-                "📅 <b>Diem danh thanh cong!</b>\n\n"
-                "🎉 Ban nhan +" + str(bonus) + " req mien phi!\n"
-                "🌟 Hen gap lai ban vao ngay mai!", parse_mode=ParseMode.HTML
+                "Diem danh thanh cong!\n\n"
+                "Ban nhan +" + str(bonus) + " req mien phi!\n"
+                "Hen gap lai ban vao ngay mai!", parse_mode=ParseMode.HTML
             )
         else:
             await query.edit_message_text(
-                "⚠️ <b>Ban da diem danh hom nay roi!</b>\n\n"
-                "🌅 Hay quay lai vao ngay mai de nhan them req nhe.", parse_mode=ParseMode.HTML
+                "Ban da diem danh hom nay roi!\n\n"
+                "Hay quay lai vao ngay mai de nhan them req nhe.", parse_mode=ParseMode.HTML
             )
 
     elif data.startswith("setmodel|"):
@@ -898,24 +858,21 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await set_user_model(user_id, model)
         prices = await get_model_prices(); price = prices.get(model, {}).get("price", 1)
         await query.edit_message_text(
-            "✅ <b>Da chuyen model!</b>\n\n"
-            "⚙️ Model: <code>" + html.escape(model) + "</code>\n"
-            "💰 Gia: " + str(price) + " req/tin nhan\n\n"
-            "💬 Bat dau chat ngay bay gio!", parse_mode=ParseMode.HTML
+            "Da chuyen model!\n\n"
+            "Model: " + html.escape(model) + "\n"
+            "Gia: " + str(price) + " req/tin nhan\n\n"
+            "Bat dau chat ngay bay gio!", parse_mode=ParseMode.HTML
         )
 
     elif data.startswith("setprompt|"):
         name = data.split("|", 1)[1]
         await set_user_prompt(user_id, name)
         await query.edit_message_text(
-            "🎭 <b>Da chuyen tinh cach!</b>\n\n"
-            "Tinh cach: <b>" + name.upper() + "</b>\n"
+            "Da chuyen tinh cach!\n\n"
+            "Tinh cach: " + name.upper() + "\n"
             "AI se tra loi theo phong cach moi tu tin nhan tiep theo.", parse_mode=ParseMode.HTML
         )
 
-# ========================
-# Chat Handler
-# ========================
 async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     u = await get_or_create_user(user_id)
@@ -923,13 +880,13 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if await is_maintenance() and not is_admin(user_id):
         await update.message.reply_text(
-            "🔧 <b>Bot dang bao tri.</b>\n\n"
+            "Bot dang bao tri.\n\n"
             "Vui long quay lai sau. Ban van co the nhan key va diem danh.", parse_mode=ParseMode.HTML
         ); return
 
     ok, remain = await check_chat_cooldown(user_id)
     if not ok:
-        await update.message.reply_text("⏳ Vui long doi " + str(remain) + " giay nua.")
+        await update.message.reply_text("Vui long doi " + str(remain) + " giay nua.")
         return
 
     model = await get_user_model(user_id)
@@ -939,9 +896,9 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if v["enabled"]: price = v["price"]; break
     success = await deduct_req(user_id, price)
     if not success:
-        keyboard = [[InlineKeyboardButton("🔑 Nhan Key Moi", callback_data="getkey")]]
+        keyboard = [[InlineKeyboardButton("Nhan Key Moi", callback_data="getkey")]]
         await update.message.reply_text(
-            "⚠️ <b>Ban da het req!</b>\n\n"
+            "Ban da het req!\n\n"
             "Can " + str(price) + " req de chat model nay.\n"
             "Nhan nut ben duoi de nhan key.",
             reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML
@@ -953,47 +910,44 @@ async def chat_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply, parse_mode=ParseMode.HTML)
     except Exception as e:
         logger.error("Chat handler error: " + str(e))
-        await update.message.reply_text("❌ AI dang ban. Vui long thu lai sau.")
+        await update.message.reply_text("AI dang ban. Vui long thu lai sau.")
 
-# ========================
-# ADMIN HANDLERS
-# ========================
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     await auto_set_admin(user_id)
     if not is_admin(user_id):
-        await update.message.reply_text("❌ Ban khong co quyen admin.")
+        await update.message.reply_text("Ban khong co quyen admin.")
         return
     await update.message.reply_text(
-        "🔐 <b>ADMIN PANEL — Denia AI</b>\n\n"
-        "<b>📊 Thong ke:</b>\n"
-        "• <code>/stats</code> — Xem thong ke tong quan\n"
-        "• <code>/logs</code> — Xem 50 hoat dong gan nhat\n"
-        "• <code>/health</code> — Kiem tra he thong\n\n"
-        "<b>👤 Quan ly Users:</b>\n"
-        "• <code>/users</code> — Danh sach users\n"
-        "• <code>/user [id]</code> — Chi tiet user\n"
-        "• <code>/addreq [id] [so req]</code> — Nap req\n"
-        "• <code>/ban [id]</code> — Khoa user\n"
-        "• <code>/unban [id]</code> — Mo khoa user\n\n"
-        "<b>⚙️ Cau hinh Bot:</b>\n"
-        "• <code>/config</code> — Xem cau hinh hien tai\n"
-        "• <code>/setconfig [key] [value]</code> — Doi cau hinh\n"
-        "• <code>/setprice [model] [gia]</code> — Doi gia model\n"
-        "• <code>/maintenance</code> — Bat/tat bao tri\n\n"
-        "<b>🤖 Quan ly Model & Prompt:</b>\n"
-        "• <code>/models</code> — Quan ly model\n"
-        "• <code>/togglemodel [model]</code> — Bat/tat model\n"
-        "• <code>/prompts</code> — Quan ly prompt\n"
-        "• <code>/addprompt [ten] [noi dung]</code> — Them prompt\n\n"
-        "<b>📢 Thong bao & Feedback:</b>\n"
-        "• <code>/broadcast [tin nhan]</code> — Gui thong bao\n"
-        "• <code>/feedbacklist</code> — Xem gop y chua doc\n"
-        "• <code>/feedbackdone [id]</code> — Danh dau da xu ly\n\n"
-        "<b>🧹 Don dep:</b>\n"
-        "• <code>/cleanup</code> — Xoa du lieu cu\n"
-        "• <code>/export</code> — Xuat CSV thong ke\n\n"
-        "📞 Admin: " + ADMIN_PHONE,
+        "ADMIN PANEL - Denia AI\n\n"
+        "Thong ke:\n"
+        "/stats - Xem thong ke tong quan\n"
+        "/logs - Xem 50 hoat dong gan nhat\n"
+        "/health - Kiem tra he thong\n\n"
+        "Quan ly Users:\n"
+        "/users - Danh sach users\n"
+        "/user [id] - Chi tiet user\n"
+        "/addreq [id] [so req] - Nap req\n"
+        "/ban [id] - Khoa user\n"
+        "/unban [id] - Mo khoa user\n\n"
+        "Cau hinh Bot:\n"
+        "/config - Xem cau hinh hien tai\n"
+        "/setconfig [key] [value] - Doi cau hinh\n"
+        "/setprice [model] [gia] - Doi gia model\n"
+        "/maintenance - Bat/tat bao tri\n\n"
+        "Quan ly Model & Prompt:\n"
+        "/models - Quan ly model\n"
+        "/togglemodel [model] - Bat/tat model\n"
+        "/prompts - Quan ly prompt\n"
+        "/addprompt [ten] [noi dung] - Them prompt\n\n"
+        "Thong bao & Feedback:\n"
+        "/broadcast [tin nhan] - Gui thong bao\n"
+        "/feedbacklist - Xem gop y chua doc\n"
+        "/feedbackdone [id] - Danh dau da xu ly\n\n"
+        "Don dep:\n"
+        "/cleanup - Xoa du lieu cu\n"
+        "/export - Xuat CSV thong ke\n\n"
+        "Admin: " + ADMIN_PHONE,
         parse_mode=ParseMode.HTML
     )
 
@@ -1002,15 +956,15 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(user_id): return
     stats = await get_stats()
     await update.message.reply_text(
-        "📊 <b>Thong Ke Denia AI</b>\n\n"
-        "👤 <b>Tong users:</b> " + str(stats['total_users']) + "\n"
-        "💎 <b>Tong req luu hanh:</b> " + str(stats['total_req']) + "\n"
-        "🔑 <b>Key da dung:</b> " + str(stats['total_keys']) + "\n"
-        "⏳ <b>Key cho xu ly:</b> " + str(stats['pending_keys']) + "\n"
-        "💬 <b>Tin nhan AI:</b> " + str(stats['total_messages']) + "\n"
-        "📅 <b>Hoat dong hom nay:</b> " + str(stats['today_logs']) + "\n"
-        "📣 <b>Feedback cho:</b> " + str(stats['pending_feedback']) + "\n\n"
-        "📞 Admin: " + ADMIN_PHONE,
+        "Thong Ke Denia AI\n\n"
+        "Tong users: " + str(stats['total_users']) + "\n"
+        "Tong req luu hanh: " + str(stats['total_req']) + "\n"
+        "Key da dung: " + str(stats['total_keys']) + "\n"
+        "Key cho xu ly: " + str(stats['pending_keys']) + "\n"
+        "Tin nhan AI: " + str(stats['total_messages']) + "\n"
+        "Hoat dong hom nay: " + str(stats['today_logs']) + "\n"
+        "Feedback cho: " + str(stats['pending_feedback']) + "\n\n"
+        "Admin: " + ADMIN_PHONE,
         parse_mode=ParseMode.HTML
     )
 
@@ -1018,9 +972,9 @@ async def logs_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
     logs = await get_recent_logs(50)
-    text = "📋 <b>Logs Gan Day (50):</b>\n\n"
+    text = "Logs Gan Day (50):\n\n"
     for l in logs:
-        text += "[" + l[4][:16] + "] <code>" + str(l[0]) + "</code> | " + html.escape(l[1] or 'N/A') + " | <b>" + l[2] + "</b> | " + html.escape(l[3]) + "\n"
+        text += "[" + l[4][:16] + "] " + str(l[0]) + " | " + html.escape(l[1] or 'N/A') + " | " + l[2] + " | " + html.escape(l[3]) + "\n"
     if len(text) > 4000: text = text[:4000] + "\n... (con nhieu)"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
@@ -1028,23 +982,23 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
     users = await get_users_list(limit=20)
-    text = "👤 <b>Danh Sach Users (20 gan nhat):</b>\n\n"
+    text = "Danh Sach Users (20 gan nhat):\n\n"
     for u in users:
-        status = "🚫 BANNED" if u[6] else "✅ OK"
+        status = "BANNED" if u[6] else "OK"
         name = html.escape(u[2] or u[1] or str(u[0]))
-        text += "<code>" + str(u[0]) + "</code> | " + name + " | Req: " + str(u[3]) + " | Keys: " + str(u[4]) + " | Msg: " + str(u[5]) + " | " + status + "\n"
+        text += str(u[0]) + " | " + name + " | Req: " + str(u[3]) + " | Keys: " + str(u[4]) + " | Msg: " + str(u[5]) + " | " + status + "\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def user_detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
     if not context.args:
-        await update.message.reply_text("⚠️ Vui long nhap user ID. Vi du: <code>/user 123456789</code>", parse_mode=ParseMode.HTML); return
+        await update.message.reply_text("Vui long nhap user ID. Vi du: /user 123456789", parse_mode=ParseMode.HTML); return
     try: target_id = int(context.args[0])
-    except ValueError: await update.message.reply_text("❌ ID khong hop le."); return
+    except ValueError: await update.message.reply_text("ID khong hop le."); return
     user = await get_or_create_user(target_id); logs = await get_user_logs(target_id, 10)
     text = (
-        "👤 <b>Chi Tiet User " + str(target_id) + "</b>\n\n"
+        "Chi Tiet User " + str(target_id) + "\n\n"
         "Username: " + html.escape(user['username'] or 'N/A') + "\n"
         "Ten: " + html.escape(user['first_name'] or 'N/A') + "\n"
         "Req: " + str(user['req_balance']) + "\n"
@@ -1052,53 +1006,53 @@ async def user_detail_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         "Messages: " + str(user['total_messages']) + "\n"
         "Model: " + html.escape(user['selected_model'] or 'N/A') + "\n"
         "Prompt: " + str(user['selected_prompt']) + "\n"
-        "Ma gioi thieu: <code>" + str(user['referral_code']) + "</code>\n"
-        "Status: " + ('🚫 BANNED' if user['banned'] else '✅ OK') + "\n"
+        "Ma gioi thieu: " + str(user['referral_code']) + "\n"
+        "Status: " + ('BANNED' if user['banned'] else 'OK') + "\n"
         "Created: " + str(user['created_at']) + "\n\n"
-        "<b>📋 Logs gan day:</b>\n"
+        "Logs gan day:\n"
     )
-    for l in logs: text += "• " + l[2] + " | " + l[0] + " | " + html.escape(l[1]) + "\n"
+    for l in logs: text += "- " + l[2] + " | " + l[0] + " | " + html.escape(l[1]) + "\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def addreq_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
     if len(context.args) < 2:
-        await update.message.reply_text("⚠️ Vi du: <code>/addreq 123456789 100</code>", parse_mode=ParseMode.HTML); return
+        await update.message.reply_text("Vi du: /addreq 123456789 100", parse_mode=ParseMode.HTML); return
     try: target_id = int(context.args[0]); amount = int(context.args[1])
-    except ValueError: await update.message.reply_text("❌ So khong hop le."); return
+    except ValueError: await update.message.reply_text("So khong hop le."); return
     await admin_add_req(target_id, amount)
-    await update.message.reply_text("✅ Da nap " + str(amount) + " req cho user <code>" + str(target_id) + "</code>", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da nap " + str(amount) + " req cho user " + str(target_id), parse_mode=ParseMode.HTML)
     try:
         await context.bot.send_message(target_id,
-            "💎 <b>Thong Bao Tu Admin</b>\n\n"
-            "Ban vua duoc cong <b>" + str(amount) + " req</b>!\n"
+            "Thong Bao Tu Admin\n\n"
+            "Ban vua duoc cong " + str(amount) + " req!\n"
             "So du hien tai da duoc cap nhat.", parse_mode=ParseMode.HTML)
     except Exception: pass
 
 async def ban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if not context.args: await update.message.reply_text("⚠️ Vi du: <code>/ban 123456789</code>", parse_mode=ParseMode.HTML); return
+    if not context.args: await update.message.reply_text("Vi du: /ban 123456789", parse_mode=ParseMode.HTML); return
     try: target_id = int(context.args[0])
-    except ValueError: await update.message.reply_text("❌ ID khong hop le."); return
+    except ValueError: await update.message.reply_text("ID khong hop le."); return
     await admin_ban_user(target_id, 1)
-    await update.message.reply_text("🚫 Da khoa user <code>" + str(target_id) + "</code>", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da khoa user " + str(target_id), parse_mode=ParseMode.HTML)
 
 async def unban_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if not context.args: await update.message.reply_text("⚠️ Vi du: <code>/unban 123456789</code>", parse_mode=ParseMode.HTML); return
+    if not context.args: await update.message.reply_text("Vi du: /unban 123456789", parse_mode=ParseMode.HTML); return
     try: target_id = int(context.args[0])
-    except ValueError: await update.message.reply_text("❌ ID khong hop le."); return
+    except ValueError: await update.message.reply_text("ID khong hop le."); return
     await admin_ban_user(target_id, 0)
-    await update.message.reply_text("✅ Da mo khoa user <code>" + str(target_id) + "</code>", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da mo khoa user " + str(target_id), parse_mode=ParseMode.HTML)
 
 async def config_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    cfg = await get_all_runtime_config(); text = "⚙️ <b>Cau Hinh Hien Tai:</b>\n\n"
-    for k, v in cfg.items(): text += "• <code>" + html.escape(k) + "</code> = <code>" + html.escape(v) + "</code>\n"
+    cfg = await get_all_runtime_config(); text = "Cau Hinh Hien Tai:\n\n"
+    for k, v in cfg.items(): text += "- " + html.escape(k) + " = " + html.escape(v) + "\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def setconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1106,75 +1060,75 @@ async def setconfig_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_admin(user_id): return
     if len(context.args) < 2:
         await update.message.reply_text(
-            "⚠️ Vi du: <code>/setconfig REQ_PER_LINK 300</code>\n"
+            "Vi du: /setconfig REQ_PER_LINK 300\n"
             "Cac key: REQ_PER_LINK, MAX_REQ_BALANCE, KEY_COOLDOWN_MINUTES, KEY_EXPIRE_MINUTES, MAX_KEYS_PER_DAY, "
             "CHAT_COOLDOWN_SECONDS, MAX_MEMORY_MESSAGES, DAILY_CHECKIN_REQ, REFERRAL_BONUS_REQ, MAINTENANCE_MODE, AUTO_CLEANUP_DAYS",
             parse_mode=ParseMode.HTML
         ); return
     key = context.args[0].strip(); value = " ".join(context.args[1:]).strip()
     await set_runtime_config(key, value)
-    await update.message.reply_text("✅ Da cap nhat: <code>" + html.escape(key) + "</code> = <code>" + html.escape(value) + "</code>", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da cap nhat: " + html.escape(key) + " = " + html.escape(value), parse_mode=ParseMode.HTML)
 
 async def setprice_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if len(context.args) < 2: await update.message.reply_text("⚠️ Vi du: <code>/setprice deepseek-v4-flash 2</code>", parse_mode=ParseMode.HTML); return
+    if len(context.args) < 2: await update.message.reply_text("Vi du: /setprice deepseek-v4-flash 2", parse_mode=ParseMode.HTML); return
     model = context.args[0].strip()
     try: price = int(context.args[1])
-    except ValueError: await update.message.reply_text("❌ Gia phai la so."); return
+    except ValueError: await update.message.reply_text("Gia phai la so."); return
     await set_model_price(model, price, 1)
-    await update.message.reply_text("✅ Da cap nhat gia: <code>" + html.escape(model) + "</code> = " + str(price) + " req", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da cap nhat gia: " + html.escape(model) + " = " + str(price) + " req", parse_mode=ParseMode.HTML)
 
 async def admin_models_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    prices = await get_model_prices(); text = "🤖 <b>Quan Ly Model:</b>\n\n"
+    prices = await get_model_prices(); text = "Quan Ly Model:\n\n"
     for k, v in prices.items():
-        status = "✅ BAT" if v["enabled"] else "❌ TAT"
-        text += "• <code>" + html.escape(k) + "</code> | " + str(v['price']) + " req | " + status + "\n"
-    text += "\nDung <code>/togglemodel [ten]</code> de bat/tat."
+        status = "BAT" if v["enabled"] else "TAT"
+        text += "- " + html.escape(k) + " | " + str(v['price']) + " req | " + status + "\n"
+    text += "\nDung /togglemodel [ten] de bat/tat."
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def togglemodel_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if not context.args: await update.message.reply_text("⚠️ Vi du: <code>/togglemodel deepseek-v4-flash</code>", parse_mode=ParseMode.HTML); return
+    if not context.args: await update.message.reply_text("Vi du: /togglemodel deepseek-v4-flash", parse_mode=ParseMode.HTML); return
     model = " ".join(context.args).strip()
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT enabled FROM model_prices WHERE model_name = ?", (model,))
         row = await cur.fetchone()
-        if not row: await update.message.reply_text("❌ Model khong ton tai."); return
+        if not row: await update.message.reply_text("Model khong ton tai."); return
         new_state = 0 if row[0] else 1
         await db.execute("UPDATE model_prices SET enabled = ? WHERE model_name = ?", (new_state, model)); await db.commit()
-    await update.message.reply_text("✅ Model <code>" + html.escape(model) + "</code> da " + ('BAT' if new_state else 'TAT'), parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Model " + html.escape(model) + " da " + ('BAT' if new_state else 'TAT'), parse_mode=ParseMode.HTML)
 
 async def admin_prompts_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    prompts = await get_all_prompts(); text = "🎭 <b>Quan Ly Prompt:</b>\n\n"
+    prompts = await get_all_prompts(); text = "Quan Ly Prompt:\n\n"
     for p in prompts:
-        status = "✅ BAT" if p[2] else "❌ TAT"
-        text += "• <b>" + p[0] + "</b> | " + status + "\n"
+        status = "BAT" if p[2] else "TAT"
+        text += "- " + p[0] + " | " + status + "\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def addprompt_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if len(context.args) < 2: await update.message.reply_text("⚠️ Vi du: <code>/addprompt funny Ban la hai huoc...</code>", parse_mode=ParseMode.HTML); return
+    if len(context.args) < 2: await update.message.reply_text("Vi du: /addprompt funny Ban la hai huoc...", parse_mode=ParseMode.HTML); return
     name = context.args[0].strip().lower(); content = " ".join(context.args[1:]).strip()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("INSERT OR REPLACE INTO prompts (name, content, enabled) VALUES (?, ?, 1)", (name, content)); await db.commit()
-    await update.message.reply_text("✅ Da them prompt: <b>" + name + "</b>", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da them prompt: " + name, parse_mode=ParseMode.HTML)
 
 async def broadcast_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if not context.args: await update.message.reply_text("⚠️ Vi du: <code>/broadcast Chao tat ca! Co tin moi...</code>", parse_mode=ParseMode.HTML); return
+    if not context.args: await update.message.reply_text("Vi du: /broadcast Chao tat ca! Co tin moi...", parse_mode=ParseMode.HTML); return
     message = " ".join(context.args); users = await get_all_users(); sent = 0; failed = 0
     for uid in users:
-        try: await context.bot.send_message(uid, "📢 <b>Thong Bao Tu Admin:</b>\n\n" + message, parse_mode=ParseMode.HTML); sent += 1; await asyncio.sleep(0.1)
+        try: await context.bot.send_message(uid, "Thong Bao Tu Admin:\n\n" + message, parse_mode=ParseMode.HTML); sent += 1; await asyncio.sleep(0.1)
         except Exception: failed += 1
-    await update.message.reply_text("✅ Da gui: " + str(sent) + " users | ❌ That bai: " + str(failed) + " users")
+    await update.message.reply_text("Da gui: " + str(sent) + " users | That bai: " + str(failed) + " users")
 
 async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1183,7 +1137,7 @@ async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     new_val = "0" if current == "1" else "1"
     await set_runtime_config("MAINTENANCE_MODE", new_val)
     status = "BAT" if new_val == "1" else "TAT"
-    await update.message.reply_text("🔧 Che do bao tri da " + status + ".", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Che do bao tri da " + status + ".", parse_mode=ParseMode.HTML)
 
 async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1191,47 +1145,47 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = []
     try:
         async with aiosqlite.connect(DB_PATH) as db: await db.execute("SELECT 1")
-        status.append("🟢 Database: OK")
-    except Exception as e: status.append("🔴 Database: " + str(e))
+        status.append("Database: OK")
+    except Exception as e: status.append("Database: " + str(e))
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             r = await client.get(AI_BASE_URL.replace("/v1/chat/completions", "/v1/models"), headers={"Authorization": "Bearer " + AI_API_KEY})
-            if r.status_code in [200, 401, 403]: status.append("🟢 AI API: OK")
-            else: status.append("🟡 AI API: HTTP " + str(r.status_code))
-    except Exception as e: status.append("🔴 AI API: " + str(e))
+            if r.status_code in [200, 401, 403]: status.append("AI API: OK")
+            else: status.append("AI API: HTTP " + str(r.status_code))
+    except Exception as e: status.append("AI API: " + str(e))
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             import urllib.parse
             test_url = YEUMONEY_API_URL + "?token=" + YEUMONEY_API_KEY + "&url=" + urllib.parse.quote("https://google.com", safe='') + "&format=json"
             r = await client.get(test_url)
-            if r.status_code == 200: status.append("🟢 Yeumoney API: OK")
-            else: status.append("🟡 Yeumoney API: HTTP " + str(r.status_code))
-    except Exception as e: status.append("🔴 Yeumoney API: " + str(e))
-    await update.message.reply_text("🏥 <b>System Health Check</b>\n\n" + "\n".join(status), parse_mode=ParseMode.HTML)
+            if r.status_code == 200: status.append("Yeumoney API: OK")
+            else: status.append("Yeumoney API: HTTP " + str(r.status_code))
+    except Exception as e: status.append("Yeumoney API: " + str(e))
+    await update.message.reply_text("System Health Check\n\n" + "\n".join(status), parse_mode=ParseMode.HTML)
 
 async def cleanup_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
     await auto_cleanup()
-    await update.message.reply_text("🧹 Da don dep du lieu cu.", parse_mode=ParseMode.HTML)
+    await update.message.reply_text("Da don dep du lieu cu.", parse_mode=ParseMode.HTML)
 
 async def feedback_list_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
     feedbacks = await get_pending_feedback(20)
-    if not feedbacks: await update.message.reply_text("✅ Khong co feedback nao cho xu ly."); return
-    text = "📣 <b>Feedback Cho Xu Ly:</b>\n\n"
-    for f in feedbacks: text += "#" + str(f[0]) + " | User <code>" + str(f[1]) + "</code> | " + f[4][:16] + "\n" + html.escape(f[3][:200]) + "\n\n"
+    if not feedbacks: await update.message.reply_text("Khong co feedback nao cho xu ly."); return
+    text = "Feedback Cho Xu Ly:\n\n"
+    for f in feedbacks: text += "#" + str(f[0]) + " | User " + str(f[1]) + " | " + f[4][:16] + "\n" + html.escape(f[3][:200]) + "\n\n"
     await update.message.reply_text(text, parse_mode=ParseMode.HTML)
 
 async def feedback_done_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     if not is_admin(user_id): return
-    if not context.args: await update.message.reply_text("⚠️ Vi du: <code>/feedbackdone 1</code>", parse_mode=ParseMode.HTML); return
+    if not context.args: await update.message.reply_text("Vi du: /feedbackdone 1", parse_mode=ParseMode.HTML); return
     try: fid = int(context.args[0])
-    except ValueError: await update.message.reply_text("❌ ID khong hop le."); return
+    except ValueError: await update.message.reply_text("ID khong hop le."); return
     await mark_feedback_done(fid)
-    await update.message.reply_text("✅ Da danh dau feedback #" + str(fid) + " da xu ly.")
+    await update.message.reply_text("Da danh dau feedback #" + str(fid) + " da xu ly.")
 
 async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -1246,13 +1200,13 @@ async def export_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_document(
         document=output.getvalue().encode('utf-8-sig'),
         filename="denia_export_" + datetime.now().strftime('%Y%m%d_%H%M') + ".csv",
-        caption="📊 Xuat du lieu users thanh cong."
+        caption="Xuat du lieu users thanh cong."
     )
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Exception: " + str(context.error))
     if isinstance(update, Update) and update.effective_message:
-        try: await update.effective_message.reply_text("❌ Da xay ra loi. Vui long thu lai sau.", parse_mode=ParseMode.HTML)
+        try: await update.effective_message.reply_text("Da xay ra loi. Vui long thu lai sau.", parse_mode=ParseMode.HTML)
         except Exception: pass
 
 async def post_init(app: Application):
@@ -1310,7 +1264,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, chat_handler))
     app.add_error_handler(error_handler)
 
-    logger.info("🚀 Denia AI Bot PRO v3 dang khoi dong...")
+    logger.info("Denia AI Bot PRO v3 dang khoi dong...")
     asyncio.run(init_db()); asyncio.run(init_model_prices()); asyncio.run(auto_cleanup())
     logger.info("Database & Model Prices da san sang.")
     logger.info("Admin: " + ADMIN_PHONE)
